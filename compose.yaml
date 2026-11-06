@@ -1,0 +1,31 @@
+services:
+  gateway:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      BANK_URL: http://bank:8787
+      DATABASE_URL: /data/gateway.sqlite3
+    volumes:
+      - gateway-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    depends_on:
+      bank:
+        condition: service_healthy
+  bank:
+    image: ghcr.io/benx421/payment-gateway-bank:latest
+    ports:
+      - "8787:8787"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://localhost:8787/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  gateway-data:
+

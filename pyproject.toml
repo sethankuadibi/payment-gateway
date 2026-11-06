@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ficmart-payment-gateway"
+version = "0.1.0"
+description = "A resilient payment gateway with stateful receipts and idempotency."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Seth Goldman" }]
+dependencies = [
+  "fastapi>=0.115,<1",
+  "httpx>=0.27,<1",
+  "uvicorn[standard]>=0.30,<1"
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<9", "pytest-asyncio>=0.24,<1", "ruff>=0.8,<1", "pytest-cov>=5,<7"]
+
+[project.scripts]
+payment-gateway = "payment_gateway.main:run"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/payment_gateway"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
