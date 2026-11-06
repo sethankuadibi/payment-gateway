@@ -76,6 +76,17 @@ async def test_duplicate_key_replays_without_calling_bank(service):
     assert [call[0] for call in bank.calls] == ["authorize"]
 
 
+async def test_duplicate_transition_key_replays_without_calling_bank(service):
+    gateway, bank = service
+    authorized = await gateway.authorize(payload(), "auth-key")
+
+    first = await gateway.transition(authorized["payment_id"], "capture", "capture-key")
+    second = await gateway.transition(authorized["payment_id"], "capture", "capture-key")
+
+    assert second == first
+    assert [call[0] for call in bank.calls] == ["authorize", "capture"]
+
+
 async def test_reusing_key_with_different_request_is_rejected(service):
     gateway, _bank = service
     await gateway.authorize(payload(), "same-key")
@@ -103,3 +114,17 @@ async def test_failed_bank_call_does_not_create_authorized_receipt(service):
         await gateway.authorize(payload(), "retry-key")
 
     assert gateway.repository.find_by_order("order-1")[0].state == PaymentState.PENDING
+
+
+async def test_retry_after_failed_bank_call_recovers_same_payment(service):
+    gateway, bank = service
+    bank.fail_next = True
+
+    with pytest.raises(GatewayError):
+        await gateway.authorize(payload(), "recover-key")
+
+    recovered = await gateway.authorize(payload(), "recover-key")
+
+    assert recovered["state"] == PaymentState.AUTHORIZED
+    assert len(gateway.by_order("order-1")) == 1
+    assert [call[0] for call in bank.calls] == ["authorize", "authorize"]

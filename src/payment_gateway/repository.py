@@ -39,6 +39,7 @@ class ReceiptRepository:
                 operation TEXT NOT NULL,
                 key TEXT NOT NULL,
                 fingerprint TEXT NOT NULL,
+                payment_id TEXT,
                 response_json TEXT,
                 PRIMARY KEY (operation, key)
             );
@@ -52,6 +53,11 @@ class ReceiptRepository:
             );
             """
         )
+        # Keep databases created by earlier versions compatible with the
+        # in-flight recovery column.
+        columns = {row[1] for row in self.connection.execute("PRAGMA table_info(idempotency_keys)")}
+        if "payment_id" not in columns:
+            self.connection.execute("ALTER TABLE idempotency_keys ADD COLUMN payment_id TEXT")
         self.connection.commit()
 
     def close(self) -> None:
@@ -109,10 +115,35 @@ class ReceiptRepository:
             return None
         return row["fingerprint"], json.loads(row["response_json"]) if row["response_json"] else None
 
-    def save_idempotency(self, operation: str, key: str, fingerprint: str, response: dict[str, Any]) -> None:
+    def get_idempotency_record(self, operation: str, key: str) -> tuple[str, str | None, dict[str, Any] | None] | None:
+        row = self.connection.execute(
+            "SELECT fingerprint, payment_id, response_json FROM idempotency_keys WHERE operation = ? AND key = ?",
+            (operation, key),
+        ).fetchone()
+        if not row:
+            return None
+        return row["fingerprint"], row["payment_id"], json.loads(row["response_json"]) if row["response_json"] else None
+
+    def save_idempotency_pending(self, operation: str, key: str, fingerprint: str, payment_id: str) -> None:
         self.connection.execute(
-            "INSERT OR REPLACE INTO idempotency_keys(operation, key, fingerprint, response_json) VALUES (?, ?, ?, ?)",
-            (operation, key, fingerprint, json.dumps(response)),
+            """INSERT INTO idempotency_keys(operation, key, fingerprint, payment_id, response_json)
+            VALUES (?, ?, ?, ?, NULL)
+            ON CONFLICT(operation, key) DO UPDATE SET
+                fingerprint=excluded.fingerprint, payment_id=excluded.payment_id, response_json=NULL""",
+            (operation, key, fingerprint, payment_id),
+        )
+        self.connection.commit()
+
+    def save_idempotency(
+        self, operation: str, key: str, fingerprint: str, response: dict[str, Any], payment_id: str | None = None
+    ) -> None:
+        self.connection.execute(
+            """INSERT INTO idempotency_keys(operation, key, fingerprint, payment_id, response_json)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(operation, key) DO UPDATE SET
+                fingerprint=excluded.fingerprint, payment_id=excluded.payment_id,
+                response_json=excluded.response_json""",
+            (operation, key, fingerprint, payment_id, json.dumps(response)),
         )
         self.connection.commit()
 
@@ -132,4 +163,3 @@ class ReceiptRepository:
             bank_void_id=row["bank_void_id"],
             bank_refund_id=row["bank_refund_id"],
         )
-
